@@ -62,7 +62,7 @@ class JudgeClient(object):
         result = output_md5 == self._get_test_case_file_info(test_case_file_id)["stripped_output_md5"]
         return output_md5, result
 
-    def _spj(self, in_file_path, user_out_file_path):
+    def _spj(self, in_file_path, user_out_file_path, spj_output_file):
         command = self._spj_config["command"].format(exe_path=self._spj_exe,
                                                      in_file_path=in_file_path,
                                                      user_out_file_path=user_out_file_path).split(" ")
@@ -75,21 +75,27 @@ class JudgeClient(object):
                              max_process_number=_judger.UNLIMITED,
                              exe_path=command[0],
                              input_path=in_file_path,
-                             output_path="/tmp/spj.out",
-                             error_path="/tmp/spj.out",
+                             output_path=spj_output_file,
+                             error_path=spj_output_file,
                              args=command[1::],
                              env=["PATH=" + os.environ.get("PATH", "")],
                              log_path=JUDGER_RUN_LOG_PATH,
                              seccomp_rule_name=seccomp_rule_name,
                              uid=RUN_USER_UID,
                              gid=RUN_GROUP_GID)
+        
+        try:
+            with open(spj_output_file, "r", encoding="utf-8") as f:
+                spj_output = f.read()
+        except Exception:
+            pass
 
         if result["result"] == _judger.RESULT_SUCCESS or \
                 (result["result"] == _judger.RESULT_RUNTIME_ERROR and
                  result["exit_code"] in [SPJ_WA, SPJ_ERROR] and result["signal"] == 0):
-            return result["exit_code"]
+            return result["exit_code"], spj_output
         else:
-            return SPJ_ERROR
+            return SPJ_ERROR, spj_output
 
     def _judge_one(self, test_case_file_id):
         test_case_info = self._get_test_case_file_info(test_case_file_id)
@@ -127,7 +133,11 @@ class JudgeClient(object):
                 if not self._spj_config or not self._spj_version:
                     raise JudgeClientError("spj_config or spj_version not set")
 
-                spj_result = self._spj(in_file_path=in_file, user_out_file_path=user_output_file)
+                spj_output_file = os.path.join(self._submission_dir, test_case_file_id + ".spj.out")
+                spj_result, spj_output = self._spj(
+                    in_file_path=in_file, user_out_file_path=user_output_file, spj_output_file=spj_output_file)
+
+                run_result["spj_output"] = spj_output
 
                 if spj_result == SPJ_WA:
                     run_result["result"] = _judger.RESULT_WRONG_ANSWER
