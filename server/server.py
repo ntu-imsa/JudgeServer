@@ -4,6 +4,7 @@ import shutil
 import uuid
 
 from flask import Flask, request, Response
+from raven.contrib.flask import Sentry
 
 from compiler import Compiler
 from config import JUDGER_WORKSPACE_BASE, SPJ_SRC_DIR, SPJ_EXE_DIR, COMPILER_GROUP_GID
@@ -11,7 +12,9 @@ from exception import TokenVerificationFailed, CompileError, SPJCompileError, Ju
 from judge_client import JudgeClient
 from utils import server_info, logger, token
 
+
 app = Flask(__name__)
+sentry = Sentry(app, dsn='')
 DEBUG = os.environ.get("judger_debug") == "1"
 app.debug = DEBUG
 
@@ -55,12 +58,16 @@ class JudgeServer:
         submission_id = uuid.uuid4().hex
 
         if spj_version and spj_config:
-            spj_exe_path = os.path.join(SPJ_EXE_DIR, spj_config["exe_name"].format(spj_version=spj_version))
+            spj_exe_path = os.path.join(SPJ_EXE_DIR, spj_config["exe_name"].format(
+                spj_version=spj_version,
+                test_case_id=test_case_id
+            ))
             # spj src has not been compiled
             if not os.path.isfile(spj_exe_path):
                 logger.warning("%s does not exists, spj src will be recompiled")
                 cls.compile_spj(spj_version=spj_version, src=spj_src,
-                                spj_compile_config=spj_compile_config)
+                                spj_compile_config=spj_compile_config,
+                                test_case_id=test_case_id)
 
         with InitSubmissionEnv(JUDGER_WORKSPACE_BASE, submission_id=str(submission_id)) as submission_dir:
             if compile_config:
@@ -93,9 +100,15 @@ class JudgeServer:
             return run_result
 
     @classmethod
-    def compile_spj(cls, spj_version, src, spj_compile_config):
-        spj_compile_config["src_name"] = spj_compile_config["src_name"].format(spj_version=spj_version)
-        spj_compile_config["exe_name"] = spj_compile_config["exe_name"].format(spj_version=spj_version)
+    def compile_spj(cls, spj_version, src, spj_compile_config, test_case_id):
+        spj_compile_config["src_name"] = spj_compile_config["src_name"].format(
+            spj_version=spj_version,
+            test_case_id=test_case_id
+        )
+        spj_compile_config["exe_name"] = spj_compile_config["exe_name"].format(
+            spj_version=spj_version,
+            test_case_id=test_case_id
+        )
 
         spj_src_path = os.path.join(SPJ_SRC_DIR, spj_compile_config["src_name"])
 
@@ -132,9 +145,11 @@ def server(path):
             ret = {"err": None, "data": getattr(JudgeServer, path)(**data)}
         except (CompileError, TokenVerificationFailed, SPJCompileError, JudgeClientError) as e:
             logger.exception(e)
+            sentry.captureException()
             ret = {"err": e.__class__.__name__, "data": e.message}
         except Exception as e:
             logger.exception(e)
+            sentry.captureException()
             ret = {"err": "JudgeClientError", "data": e.__class__.__name__ + " :" + str(e)}
     else:
         ret = {"err": "InvalidRequest", "data": "404"}

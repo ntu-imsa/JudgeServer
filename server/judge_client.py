@@ -37,8 +37,13 @@ class JudgeClient(object):
         self._spj_config = spj_config
         self._output = output
         if self._spj_version and self._spj_config:
-            self._spj_exe = os.path.join(SPJ_EXE_DIR,
-                                         self._spj_config["exe_name"].format(spj_version=self._spj_version))
+            self._spj_exe = os.path.join(
+                SPJ_EXE_DIR,
+                self._spj_config["exe_name"].format(
+                    spj_version=self._spj_version,
+                    test_case_id=self._test_case_id
+                )
+            )
             if not os.path.exists(self._spj_exe):
                 raise JudgeClientError("spj exe not found")
 
